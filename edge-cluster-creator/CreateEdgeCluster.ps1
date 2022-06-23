@@ -111,7 +111,7 @@ $VAppName = "edge-cluster-$random_string"
 
 $preCheck = 1
 $confirmDeployment = 1
-$deployNestedESXiVMs = 0 ####
+$deployNestedESXiVMs = 1 ####
 $deployVCSA = 0 #####
 $setupNewVC = 0
 $addESXiHostsToVC = 0
@@ -468,9 +468,6 @@ if($confirmDeployment -eq 1) {
     $esxiTotalCPU = $NestedESXiHostnameToIPs.count * [int]$NestedESXivCPU
     $esxiTotalMemory = $NestedESXiHostnameToIPs.count * [int]$NestedESXivMEM
     $esxiTotalStorage = ($NestedESXiHostnameToIPs.count * [int]$NestedESXiCachingvDisk) + ($NestedESXiHostnameToIPs.count * [int]$NestedESXiCapacityvDisk)
-    # $vcsaTotalCPU = $vcsaSize2MemoryStorageMap.$VCSADeploymentSize.cpu
-    # $vcsaTotalMemory = $vcsaSize2MemoryStorageMap.$VCSADeploymentSize.mem
-    # $vcsaTotalStorage = $vcsaSize2MemoryStorageMap.$VCSADeploymentSize.disk
 
     Write-Host -ForegroundColor Yellow "`n---- Resource Requirements ----"
     Write-Host -NoNewline -ForegroundColor Green "ESXi     VM CPU: "
@@ -507,13 +504,15 @@ if($confirmDeployment -eq 1) {
 if($deployNestedESXiVMs -eq 1) {
     My-Logger "Beginning deployment of nested Edge Simulator Cluster ..."
 
+    # If connect isn't working make sure to disable the TSL checks in PowerCLI
+    # Set-PowerCLIConfiguration -InvalidCertificateAction Ignore
     My-Logger "Connecting to Management vCenter Server $VIServer ..."
-    # $viConnection = Connect-VIServer $VIServer -User $VIUsername -Password $VIPassword -WarningAction SilentlyContinue
+    $viConnection = Connect-VIServer $VIServer -User $VIUsername -Password $VIPassword -WarningAction SilentlyContinue
 
-    # $datastore = Get-Datastore -Server $viConnection -Name $VMDatastore | Select -First 1
-    # $cluster = Get-Cluster -Server $viConnection -Name $VMCluster
-    # $datacenter = $cluster | Get-Datacenter
-    # $vmhost = $cluster | Get-VMHost | Select -First 1
+    $datastore = Get-Datastore -Server $viConnection -Name $VMDatastore | Select -First 1
+    $cluster = Get-Cluster -Server $viConnection -Name $VMCluster
+    $datacenter = $cluster | Get-Datacenter
+    $vmhost = $cluster | Get-VMHost | Select -First 1
 
 
     # $NestedESXiHostnameToIPs.GetEnumerator() | Sort-Object -Property Value | Foreach-Object {
@@ -615,7 +614,7 @@ if($moveVMsIntovApp -eq 1) {
 
 if( $deployNestedESXiVMs -eq 1 ) {
     My-Logger "Disconnecting from $VIServer ..."
-    # Disconnect-VIServer -Server $viConnection -Confirm:$false
+    Disconnect-VIServer -Server $viConnection -Confirm:$false
 }
 
 if($setupNewVC -eq 1) {
