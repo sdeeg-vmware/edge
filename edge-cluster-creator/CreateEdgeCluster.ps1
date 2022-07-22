@@ -29,14 +29,14 @@ $NestedESXiCapacityvDisk = "110" #GB
 $VMDatacenter = "MiniRack"
 $VMCluster = "P10-Cluster"
 $VMNetwork = "Tanzu-Management-DPGroup"
-$VMDatastore = "Yoyodyn3"
+$VMDatastore = "Yoyodyne"
 $VMNetmask = "255.255.255.0"
 $VMGateway = "192.168.10.1"
 $VMDNS = "192.168.10.1"
 $VMNTP = "pool.ntp.org"
 $VMPassword = "Tanzu1!"
 $VMDomain = "planet10.lab"
-$VMSyslog = "192.168.3.50"
+#$VMSyslog = "192.168.3.50" #???
 $VMFolder = "Edge"
 # Applicable to Nested ESXi only
 $VMSSH = "true"
@@ -70,21 +70,12 @@ $TunnelEndpointIPRangeEnd = "172.30.10.20"
 $TunnelEndpointCIDR = "172.30.10.0/24"
 $TunnelEndpointGateway = "172.30.10.1"
 
-# Transport Zones
-$OverlayTransportZoneName = "TZ-Overlay"
-$OverlayTransportZoneHostSwitchName = "nsxswitch"
-$VlanTransportZoneName = "TZ-VLAN"
-$VlanTransportZoneNameHostSwitchName = "edgeswitch"
-
-# Network Segment
-$NetworkSegmentName = "Pacific-Segment"
-$NetworkSegmentVlan = "0"
-
-# Uplink Profiles
+# Uplink Profiles TODO: figure this out fo rmy uplinks
 $ESXiUplinkProfileName = "ESXi-Host-Uplink-Profile"
 $ESXiUplinkProfilePolicy = "FAILOVER_ORDER"
 $ESXiUplinkName = "uplink1"
 
+# Edge Profile TODO: These settings need to be changed to match my environment
 $EdgeUplinkProfileName = "Edge-Uplink-Profile"
 $EdgeUplinkProfilePolicy = "FAILOVER_ORDER"
 $EdgeOverlayUplinkName = "uplink1"
@@ -93,10 +84,6 @@ $EdgeUplinkName = "tep-uplink"
 $EdgeUplinkProfileActivepNIC = "fp-eth2"
 $EdgeUplinkProfileTransportVLAN = "0"
 $EdgeUplinkProfileMTU = "1600"
-
-# Edge Cluster
-# $EdgeClusterName = "tkgi-Edge-Cluster-01"
-
 
 # Advanced Configurations
 # Set to 1 only if you have DNS (forward/reverse) for ESXi hostnames
@@ -111,10 +98,10 @@ $VAppName = "edge-cluster-$random_string"
 
 $preCheck = 1
 $confirmDeployment = 1
+$preWorkCheks = 1
 $deployNestedESXiVMs = 1 ####
-$deployVCSA = 0 #####
-$setupNewVC = 0
-$addESXiHostsToVC = 0
+$setupVC = 1
+$addESXiHostsToVC = 1
 $configureVSANDiskGroup = 0
 $configureVDS = 0
 $clearVSANHealthCheckAlarm = 0
@@ -127,31 +114,9 @@ $moveVMsIntovApp = 0
 $deployTKGI = 0
 $deployAVI = 0 #####
 
-$vcsaSize2MemoryStorageMap = @{
-"tiny"=@{"cpu"="2";"mem"="12";"disk"="415"};
-"small"=@{"cpu"="4";"mem"="19";"disk"="480"};
-"medium"=@{"cpu"="8";"mem"="28";"disk"="700"};
-"large"=@{"cpu"="16";"mem"="37";"disk"="1065"};
-"xlarge"=@{"cpu"="24";"mem"="56";"disk"="1805"}
-}
-
-$nsxStorageMap = @{
-"manager"="200";
-"edge"="200"
-}
-
 $esxiTotalCPU = 0
-$vcsaTotalCPU = 0
-$nsxManagerTotalCPU = 0
-$nsxEdgeTotalCPU = 0
 $esxiTotalMemory = 0
-$vcsaTotalMemory = 0
-$nsxManagerTotalMemory = 0
-$nsxEdgeTotalMemory = 0
 $esxiTotalStorage = 0
-$vcsaTotalStorage = 0
-$nsxManagerTotalStorage = 0
-$nsxEdgeTotalStorage = 0
 
 $StartTime = Get-Date
 
@@ -406,16 +371,17 @@ Function URL-Check([string] $url) {
 
 if($preCheck -eq 1) {
 
-    Write-Host -ForegroundColor Green "`nNested Edge Cluster Creator"
-    if(!(Test-Path $NestedESXiApplianceOVA)) {
-        Write-Host -ForegroundColor Red "`nUnable to find $NestedESXiApplianceOVA ...`nexiting"
-        #exit
-    }
-
     if($PSVersionTable.PSEdition -ne "Core") {
         Write-Host -ForegroundColor Red "`tYPowerShell Core was not detected, please install that before continuing ... `nexiting"
-        #exit
+        exit
     }
+
+    # TODO: Change to look for VM Template in inventory
+    # Write-Host -ForegroundColor Green "`nNested Edge Cluster Creator"
+    # if(!(Test-Path $NestedESXiApplianceOVA)) {
+    #     Write-Host -ForegroundColor Red "`nUnable to find $NestedESXiApplianceOVA ...`nexiting"
+    #     exit
+    # }
 }
 
 if($confirmDeployment -eq 1) {
@@ -501,6 +467,10 @@ if($confirmDeployment -eq 1) {
 
 #############  Begin Real Work
 
+if($preWorkCheks) {
+
+}
+
 if($deployNestedESXiVMs -eq 1) {
     My-Logger "Beginning deployment of nested Edge Simulator Cluster ..."
 
@@ -508,6 +478,10 @@ if($deployNestedESXiVMs -eq 1) {
     # Set-PowerCLIConfiguration -InvalidCertificateAction Ignore
     My-Logger "Connecting to Management vCenter Server $VIServer ..."
     $viConnection = Connect-VIServer $VIServer -User $VIUsername -Password $VIPassword -WarningAction SilentlyContinue
+    if(!$viConnection) {
+        My-Logger "Connect-VIServer came back empty.  Exiting."
+        exit
+    }
 
     $datastore = Get-Datastore -Server $viConnection -Name $VMDatastore | Select -First 1
     $cluster = Get-Cluster -Server $viConnection -Name $VMCluster
