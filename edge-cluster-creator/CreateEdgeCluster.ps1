@@ -14,9 +14,9 @@ $VIPassword = "K@ngaR00"
 
 # Nested ESXi VMs to deploy
 $NestedESXiHostnameToIPs = @{
-    "vesx1" = "192.168.10.81"
-    "vesx2" = "192.168.10.82"
-    "vesx3" = "192.168.10.83"
+    "vesx1" = "192.168.11.11"
+    "vesx2" = "192.168.11.12"
+    "vesx3" = "192.168.11.13"
 }
 
 # Nested ESXi VM Resources
