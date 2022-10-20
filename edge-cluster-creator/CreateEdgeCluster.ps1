@@ -8,7 +8,7 @@
 #############################################  Env Variables  #############################################
 
 # vCenter Server used to deploy virtual edge cluster
-$VIServer = "192.168.10.50"
+$VIServer = "vcenter.planet10.lab"
 $VIUsername = "administrator@planet10.lab"
 $VIPassword = "K@ngaR00"
 
@@ -468,7 +468,7 @@ if($confirmDeployment -eq 1) {
 #############  Begin Real Work
 
 if($preWorkCheks) {
-
+    My-Logger "Doing pre-work checks"
 }
 
 if($deployNestedESXiVMs -eq 1) {
