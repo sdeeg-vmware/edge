@@ -22,6 +22,67 @@ Function Write-vCluster-Spec {
     }
 }
 
+$vSphereSpec = @{
+    "vCenterServer" = "vcenter.planet10.lab"
+    "Username" = "administrator@planet10.lab"
+    "Password" = "K@ngaR00"
+    "Datacenter" = "MiniRack"
+    "Cluster" = "P10-Cluster"
+    "Folder" = "edge"
+}
+
+$vHostSpec = @{
+    "vCpu" = "6"
+    "vMem" = "16"
+    "Network" = @{
+        "Name" = "10Ge-Network"
+        "Netmask" = "255.255.255.0"
+        "Gateway" = "192.168.6.1"
+        "DNS" = "192.168.4.20"
+    }
+    "NTP" = "pool.ntp.org"
+    "Password" = "Tanzu1!"
+    "Domain" = "planet10.lab"
+    "Syslog" = "192.168.3.50" #???
+    "vCenterFolder" = "edge"
+
+    # Applicable to Nested ESXi only
+    "VMSSH" = "true"
+    "VMVMFS" = "false"
+    "Storage" = @{
+        "Main" = "Yoyodyne"
+        "Caching" = "8" # In GB if using Main storage
+        "Capacity" = "110" # In GB if using Main storage
+    }
+}
+
+Function Show-Cluster-Details {
+    My-Logger "Virtual Cluster Spec:"
+    My-Logger "    vSphere:"
+    My-Logger "        vCenterServer=$($vSphereSpec.vCenterServer)"
+    My-Logger "        Username=$($vSphereSpec.Username)"
+    My-Logger "        Datacenter=$($vSphereSpec.Datacenter)"
+    My-Logger "        Cluster=$($vSphereSpec.Cluster)"
+    My-Logger "        Folder=$($vSphereSpec.Folder)"
+
+    My-Logger "    vHosts to create:"
+    $NestedESXiHostnameToIPs.GetEnumerator() | Sort-Object -Property Value | Foreach-Object {
+        $VMName = $_.Key
+        $VMIPAddress = $_.Value
+        My-Logger "        vHost=$VMName Ip=$VMIPAddress"
+    }
+    My-Logger "    vHosts details:"
+
+    # Display what is currently deployed
+    $foundVMsCount = $foundVMs.Count
+    My-Logger "Found vHosts ( $foundVMsCount ):"
+    foreach ($vm in $foundVMs) {
+        $VMName = $vm.Name
+        $VMps = $vm.PowerState
+        My-Logger "    vHost=$VMName State=$VMps"
+    }
+}
+
 # If connect isn't working make sure to disable the TSL checks in PowerCLI
 # Set-PowerCLIConfiguration -InvalidCertificateAction Ignore
 My-Logger "Connecting to vCenter Server $VIServer ..." Blue $true
@@ -59,24 +120,33 @@ while($keepLooping) {
     Write-Host ""
     Write-vCluster-Spec
 
-    $no = New-Object System.Management.Automation.Host.ChoiceDescription '&No', 'Exit'
+    $no = New-Object System.Management.Automation.Host.ChoiceDescription 'E&xit', 'Exit'
     $options = [System.Management.Automation.Host.ChoiceDescription[]]($no)
     if($foundVMs.Count -eq 0) {
         $options += New-Object System.Management.Automation.Host.ChoiceDescription '&Create cluster', 'Create the edge cluster'
     } else {
         $options += New-Object System.Management.Automation.Host.ChoiceDescription '&Delete cluster', 'Delete the edge cluster'
     }
+    $options += New-Object System.Management.Automation.Host.ChoiceDescription '&Show details', 'Show details of the edge cluster'
     $result = $host.ui.PromptForChoice('Edge Manager', 'Do something?', $options, 0)
 
-    if($result -eq 0) {
-        My-Logger "You said No"
-        $keepLooping=$false
-    }
-    if ($result -eq 1) {
-        if($foundVMs.Count -gt 0) {
-            Delete-Edge-Cluster
-        } else {
-            Create-Edge-Cluster
+    switch ($result) {
+        0 {
+            My-Logger "You said No"
+            $keepLooping=$false
+        }
+        1 {
+            if($foundVMs.Count -gt 0) {
+                Delete-Edge-Cluster
+            } else {
+                Create-Edge-Cluster
+            }    
+        }
+        2 {
+            Clear-Host
+            Show-Cluster-Details
+            Write-Host ""
+            Read-Host -Prompt 'Press Enter when done'
         }
     }
 }

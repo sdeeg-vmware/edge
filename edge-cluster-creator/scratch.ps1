@@ -11,5 +11,13 @@ $NestedESXiHostnameToIPs = @{
 # $hostEnum.MoveNext()
 # $hostEnum.Current | Write-Output
 
-My-Logger "Getting the cluster" Blue
+$vSphereSpec = @{
+    "vCenterServer" = "vcenter.planet10.lab"
+    "Username" = "administrator@planet10.lab"
+    "Password" = "K@ngaR00"
+    "Datacenter" = "MiniRack"
+    "Cluster" = "P10-Cluster"
+    "Folder" = "edge"
+}
 
+Write-Host "The vCenter is at: $($vSphereSpec.vCenterServer)"
