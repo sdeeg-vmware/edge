@@ -98,7 +98,7 @@ catch {
     My-Logger "Exception caught: $_.Exception.InnerException"
 }
 
-# if($viConnection) {
-#     My-Logger "Disconnecting from $VIServer ..."
-#     Disconnect-VIServer -Server $viConnection -Confirm:$false
-# }
+if($viConnection) {
+    My-Logger "Disconnecting from $VIServer ..."
+    Disconnect-VIServer -Server $viConnection -Confirm:$false
+}
