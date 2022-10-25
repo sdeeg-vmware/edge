@@ -1,420 +1,153 @@
 #############################################  Functions  #############################################
 
-Function Get-SSLThumbprint256 {
-    param(
-    [Parameter(
-        Position=0,
-        Mandatory=$true,
-        ValueFromPipeline=$true,
-        ValueFromPipelineByPropertyName=$true)
-    ]
-    [Alias('FullName')]
-    [String]$URL
-    )
-
-    $Code = @'
-using System;
-using System.Collections.Generic;
-using System.Net.Http;
-using System.Net.Security;
-using System.Security.Cryptography.X509Certificates;
-
-namespace CertificateCapture
-{
-    public class Utility
-    {
-        public static Func<HttpRequestMessage,X509Certificate2,X509Chain,SslPolicyErrors,Boolean> ValidationCallback =
-            (message, cert, chain, errors) => {
-                var newCert = new X509Certificate2(cert);
-                var newChain = new X509Chain();
-                newChain.Build(newCert);
-                CapturedCertificates.Add(new CapturedCertificate(){
-                    Certificate =  newCert,
-                    CertificateChain = newChain,
-                    PolicyErrors = errors,
-                    URI = message.RequestUri
-                });
-                return true;
-            };
-        public static List<CapturedCertificate> CapturedCertificates = new List<CapturedCertificate>();
-    }
-
-    public class CapturedCertificate
-    {
-        public X509Certificate2 Certificate { get; set; }
-        public X509Chain CertificateChain { get; set; }
-        public SslPolicyErrors PolicyErrors { get; set; }
-        public Uri URI { get; set; }
-    }
-}
-'@
-    if ($PSEdition -ne 'Core'){
-        Add-Type -AssemblyName System.Net.Http
-        if (-not ("CertificateCapture" -as [type])) {
-            Add-Type $Code -ReferencedAssemblies System.Net.Http
-        }
-    } else {
-        if (-not ("CertificateCapture" -as [type])) {
-            Add-Type $Code
-        }
-    }
-
-    $Certs = [CertificateCapture.Utility]::CapturedCertificates
-
-    $Handler = [System.Net.Http.HttpClientHandler]::new()
-    $Handler.ServerCertificateCustomValidationCallback = [CertificateCapture.Utility]::ValidationCallback
-    $Client = [System.Net.Http.HttpClient]::new($Handler)
-    $Result = $Client.GetAsync($Url).Result
-
-    $sha256 = [Security.Cryptography.SHA256]::Create()
-    $certBytes = $Certs[-1].Certificate.GetRawCertData()
-    $hash = $sha256.ComputeHash($certBytes)
-    $thumbprint = [BitConverter]::ToString($hash).Replace('-',':')
-    return $thumbprint
-}
-
-Function Set-VMKeystrokes {
-    <#
-        Please see http://www.virtuallyghetto.com/2017/09/automating-vm-keystrokes-using-the-vsphere-api-powercli.html for more details
-    #>
-        param(
-            [Parameter(Mandatory=$true)][String]$VMName,
-            [Parameter(Mandatory=$true)][String]$StringInput,
-            [Parameter(Mandatory=$false)][Boolean]$ReturnCarriage,
-            [Parameter(Mandatory=$false)][Boolean]$DebugOn
-        )
-
-        # Map subset of USB HID keyboard scancodes
-        # https://gist.github.com/MightyPork/6da26e382a7ad91b5496ee55fdc73db2
-        $hidCharacterMap = @{
-            "a"="0x04";
-            "b"="0x05";
-            "c"="0x06";
-            "d"="0x07";
-            "e"="0x08";
-            "f"="0x09";
-            "g"="0x0a";
-            "h"="0x0b";
-            "i"="0x0c";
-            "j"="0x0d";
-            "k"="0x0e";
-            "l"="0x0f";
-            "m"="0x10";
-            "n"="0x11";
-            "o"="0x12";
-            "p"="0x13";
-            "q"="0x14";
-            "r"="0x15";
-            "s"="0x16";
-            "t"="0x17";
-            "u"="0x18";
-            "v"="0x19";
-            "w"="0x1a";
-            "x"="0x1b";
-            "y"="0x1c";
-            "z"="0x1d";
-            "1"="0x1e";
-            "2"="0x1f";
-            "3"="0x20";
-            "4"="0x21";
-            "5"="0x22";
-            "6"="0x23";
-            "7"="0x24";
-            "8"="0x25";
-            "9"="0x26";
-            "0"="0x27";
-            "!"="0x1e";
-            "@"="0x1f";
-            "#"="0x20";
-            "$"="0x21";
-            "%"="0x22";
-            "^"="0x23";
-            "&"="0x24";
-            "*"="0x25";
-            "("="0x26";
-            ")"="0x27";
-            "_"="0x2d";
-            "+"="0x2e";
-            "{"="0x2f";
-            "}"="0x30";
-            "|"="0x31";
-            ":"="0x33";
-            "`""="0x34";
-            "~"="0x35";
-            "<"="0x36";
-            ">"="0x37";
-            "?"="0x38";
-            "-"="0x2d";
-            "="="0x2e";
-            "["="0x2f";
-            "]"="0x30";
-            "\"="0x31";
-            "`;"="0x33";
-            "`'"="0x34";
-            ","="0x36";
-            "."="0x37";
-            "/"="0x38";
-            " "="0x2c";
-        }
-
-        $vm = Get-View -ViewType VirtualMachine -Filter @{"Name"=$VMName}
-
-        # Verify we have a VM or fail
-        if(!$vm) {
-            Write-host "Unable to find VM $VMName"
-            return
-        }
-
-        $hidCodesEvents = @()
-        foreach($character in $StringInput.ToCharArray()) {
-            # Check to see if we've mapped the character to HID code
-            if($hidCharacterMap.ContainsKey([string]$character)) {
-                $hidCode = $hidCharacterMap[[string]$character]
-
-                $tmp = New-Object VMware.Vim.UsbScanCodeSpecKeyEvent
-
-                # Add leftShift modifer for capital letters and/or special characters
-                if( ($character -cmatch "[A-Z]") -or ($character -match "[!|@|#|$|%|^|&|(|)|_|+|{|}|||:|~|<|>|?]") ) {
-                    $modifer = New-Object Vmware.Vim.UsbScanCodeSpecModifierType
-                    $modifer.LeftShift = $true
-                    $tmp.Modifiers = $modifer
-                }
-
-                # Convert to expected HID code format
-                $hidCodeHexToInt = [Convert]::ToInt64($hidCode,"16")
-                $hidCodeValue = ($hidCodeHexToInt -shl 16) -bor 0007
-
-                $tmp.UsbHidCode = $hidCodeValue
-                $hidCodesEvents+=$tmp
-            } else {
-                My-Logger Write-Host "The following character `"$character`" has not been mapped, you will need to manually process this character"
-                break
-            }
-        }
-
-        # Add return carriage to the end of the string input (useful for logins or executing commands)
-        if($ReturnCarriage) {
-            # Convert return carriage to HID code format
-            $hidCodeHexToInt = [Convert]::ToInt64("0x28","16")
-            $hidCodeValue = ($hidCodeHexToInt -shl 16) + 7
-
-            $tmp = New-Object VMware.Vim.UsbScanCodeSpecKeyEvent
-            $tmp.UsbHidCode = $hidCodeValue
-            $hidCodesEvents+=$tmp
-        }
-
-        # Call API to send keystrokes to VM
-        $spec = New-Object Vmware.Vim.UsbScanCodeSpec
-        $spec.KeyEvents = $hidCodesEvents
-        $results = $vm.PutUsbScanCodes($spec)
-}
-
-# Function My-Logger {
-#     param(
-#     [Parameter(Mandatory=$true)]
-#     [String]$message
-#     )
-
-#     $timeStamp = Get-Date -Format "MM-dd-yyyy_hh:mm:ss"
-
-#     Write-Host -NoNewline -ForegroundColor White "[$timestamp]"
-#     Write-Host -ForegroundColor Green " $message"
-#     $logMessage = "[$timeStamp] $message"
-#     $logMessage | Out-File -Append -LiteralPath $verboseLogFile
-# }
-
-Function URL-Check([string] $url) {
-    $isWorking = $true
-
-    try {
-        $request = [System.Net.WebRequest]::Create($url)
-        $request.Method = "HEAD"
-        $request.UseDefaultCredentials = $true
-
-        $response = $request.GetResponse()
-        $httpStatus = $response.StatusCode
-
-        $isWorking = ($httpStatus -eq "OK")
-    }
-    catch {
-        $isWorking = $false
-    }
-    return $isWorking
-}
-
-Function Confirm-Deployment {
-    Write-Host -ForegroundColor Magenta "`nPlease confirm the following configuration will be deployed:`n"
-
-    Write-Host -ForegroundColor Yellow "---- Virtual ESXi cluster Image ---- "
-    Write-Host -NoNewline -ForegroundColor Green "Nested ESXi Image Path: "
-    Write-Host -ForegroundColor White $NestedESXiApplianceOVA
-
-    Write-Host -ForegroundColor Yellow "`n---- vCenter Server Deployment Target Configuration ----"
-    Write-Host -NoNewline -ForegroundColor Green "vCenter Server Address: "
-    Write-Host -ForegroundColor White $VIServer
-    Write-Host -NoNewline -ForegroundColor Green "VM Network: "
-    Write-Host -ForegroundColor White $VMNetwork
-
-    Write-Host -NoNewline -ForegroundColor Green "VM Storage: "
-    Write-Host -ForegroundColor White $VMDatastore
-    Write-Host -NoNewline -ForegroundColor Green "VM Cluster: "
-    Write-Host -ForegroundColor White $VMCluster
-    Write-Host -NoNewline -ForegroundColor Green "VM vApp: "
-    Write-Host -ForegroundColor White $VAppName
-
-    Write-Host -ForegroundColor Yellow "`n---- vESXi Configuration ----"
-    Write-Host -NoNewline -ForegroundColor Green "# of Nested ESXi VMs: "
-    Write-Host -ForegroundColor White $NestedESXiHostnameToIPs.count
-    Write-Host -NoNewline -ForegroundColor Green "vCPU: "
-    Write-Host -ForegroundColor White $NestedESXivCPU
-    Write-Host -NoNewline -ForegroundColor Green "vMEM: "
-    Write-Host -ForegroundColor White "$NestedESXivMEM GB"
-    Write-Host -NoNewline -ForegroundColor Green "Caching VMDK: "
-    Write-Host -ForegroundColor White "$NestedESXiCachingvDisk GB"
-    Write-Host -NoNewline -ForegroundColor Green "Capacity VMDK: "
-    Write-Host -ForegroundColor White "$NestedESXiCapacityvDisk GB"
-    Write-Host -NoNewline -ForegroundColor Green "IP Address(s): "
-    Write-Host -ForegroundColor White $NestedESXiHostnameToIPs.Values
-    Write-Host -NoNewline -ForegroundColor Green "Netmask "
-    Write-Host -ForegroundColor White $VMNetmask
-    Write-Host -NoNewline -ForegroundColor Green "Gateway: "
-    Write-Host -ForegroundColor White $VMGateway
-    Write-Host -NoNewline -ForegroundColor Green "DNS: "
-    Write-Host -ForegroundColor White $VMDNS
-    Write-Host -NoNewline -ForegroundColor Green "NTP: "
-    Write-Host -ForegroundColor White $VMNTP
-    Write-Host -NoNewline -ForegroundColor Green "Syslog: "
-    Write-Host -ForegroundColor White $VMSyslog
-    Write-Host -NoNewline -ForegroundColor Green "Enable SSH: "
-    Write-Host -ForegroundColor White $VMSSH
-    Write-Host -NoNewline -ForegroundColor Green "Create VMFS Volume: "
-    Write-Host -ForegroundColor White $VMVMFS
-
-    $esxiTotalCPU = $NestedESXiHostnameToIPs.count * [int]$NestedESXivCPU
-    $esxiTotalMemory = $NestedESXiHostnameToIPs.count * [int]$NestedESXivMEM
-    $esxiTotalStorage = ($NestedESXiHostnameToIPs.count * [int]$NestedESXiCachingvDisk) + ($NestedESXiHostnameToIPs.count * [int]$NestedESXiCapacityvDisk)
-
-    Write-Host -ForegroundColor Yellow "`n---- Resource Requirements ----"
-    Write-Host -NoNewline -ForegroundColor Green "ESXi     VM CPU: "
-    Write-Host -NoNewline -ForegroundColor White $esxiTotalCPU
-    Write-Host -NoNewline -ForegroundColor Green " ESXi     VM Memory: "
-    Write-Host -NoNewline -ForegroundColor White $esxiTotalMemory "GB "
-    Write-Host -NoNewline -ForegroundColor Green "ESXi     VM Storage: "
-    Write-Host -ForegroundColor White $esxiTotalStorage "GB"
-    Write-Host -NoNewline -ForegroundColor Green "VCSA     VM CPU: "
-    Write-Host -NoNewline -ForegroundColor White $vcsaTotalCPU
-    Write-Host -NoNewline -ForegroundColor Green " VCSA     VM Memory: "
-    Write-Host -NoNewline -ForegroundColor White $vcsaTotalMemory "GB "
-    Write-Host -NoNewline -ForegroundColor Green "VCSA     VM Storage: "
-    Write-Host -ForegroundColor White $vcsaTotalStorage "GB"
-
-    Write-Host -ForegroundColor White "---------------------------------------------"
-    Write-Host -NoNewline -ForegroundColor Green "Total CPU: "
-    Write-Host -ForegroundColor White ($esxiTotalCPU + $vcsaTotalCPU + $nsxManagerTotalCPU + $nsxEdgeTotalCPU)
-    Write-Host -NoNewline -ForegroundColor Green "Total Memory: "
-    Write-Host -ForegroundColor White ($esxiTotalMemory + $vcsaTotalMemory + $nsxManagerTotalMemory + $nsxEdgeTotalMemory) "GB"
-    Write-Host -NoNewline -ForegroundColor Green "Total Storage: "
-    Write-Host -ForegroundColor White ($esxiTotalStorage + $vcsaTotalStorage + $nsxManagerTotalStorage + $nsxEdgeTotalStorage) "GB"
-
-    Write-Host -ForegroundColor Magenta "`nWould you like to proceed with this deployment?`n"
-    $answer = Read-Host -Prompt "Do you accept (Y or N)"
-    if($answer -ne "Y" -or $answer -ne "y") {
-        exit
-    }
-}
-
 Function Do-Pre-Checks {
-    My-Logger "Doing the pre checks..."
+    My-Logger "Starting pre checks..."
 
     if($PSVersionTable.PSEdition -ne "Core") {
-        My-Logger "`tYPowerShell Core was not detected, please install that before continuing ... `nexiting"
+        My-Logger "`tYPowerShell Core was not detected, please install before continuing ... `nexiting"
         exit 0
     }
-    My-Logger "PowerShell detected"
+    My-Logger "`tPowerShell detected"
+
+    if($vCluster.Keys.Count -eq 0) {
+        My-Logger "`tUnable to find the list of vHosts, please set the variable vCluster ...`nexiting"
+        exit 0
+    }
+    My-Logger "`tvHost list found"
 
     #TODO: Can we change this to look for the VM Template in inventory
-    if(!(Test-Path $NestedESXiApplianceOVA)) {
-        My-Logger "`nUnable to find $NestedESXiApplianceOVA ...`nexiting"
+    if(!$NestedESXiApplianceOVA) {
+        My-Logger "`NestedESXiApplianceOVA is default or unset.  Set to path to ESXi OVA`nexiting"
         exit 0
     }
-    My-Logger "Nested ESXi Appliance found"
+    if(!(Test-Path $NestedESXiApplianceOVA)) {
+        My-Logger "`tUnable to find the file $NestedESXiApplianceOVA ...`nexiting"
+        exit 0
+    }
+    My-Logger "`tNested ESXi Appliance found"
+
+    My-Logger "Finished pre checks"
+}
+
+Function VCenter-Connect {
+    # If connect isn't working make sure to disable the TSL checks in PowerCLI
+    # Set-PowerCLIConfiguration -InvalidCertificateAction Ignore
+    My-Logger "Connecting to vCenter Server $vSphereSpec.vCenterServer ... " Blue $true
+    $viConnection = Connect-VIServer $vSphereSpec.vCenterServer -User $vSphereSpec.UserName -Password $vSphereSpec.Password -WarningAction SilentlyContinue
+    if(!$viConnection) {
+        My-Logger "Connect-VIServer came back empty.  Exiting." Red
+        exit
+    }
+    My-Logger "connected" Green
+
+    # Todo: Add validation of vCenter details here
 }
 
 
+Function VCenter-Disconnect {
+    if( $viConnection ) {
+        My-Logger "Disconnecting from $vSphereSpec.vCenterServer ..."
+        # Disconnect-VIServer -Server $viConnection -Confirm:$false
+        Disconnect-VIServer * -Confirm:$false | Out-Null
+    }
+    $viConnection = $null
+}
+
+Function Refresh-Cluster-Details {
+
+}
 
 Function Create-Edge-Cluster {
-    My-Logger "Setting up to deploy nested cluster ..."
+    My-Logger "Deploying the Edge Cluster"
 
+    My-Logger "Looking for hosts to deploy the vHosts to"
+    if(!$cluster) { $cluster = Get-Cluster -Name $vSphereSpec.Cluster }
     $hosts = $cluster | Get-VMHost
-    $requestedVirtualHosts = $NestedESXiHostnameToIPs.Count
-    $availableHosts = $hosts.Count
-    if($requestedVirtualHosts -gt $availableHosts) {
-        My-Logger "There are not enough hosts ($requestedVirtualHosts) for all the requested virtual hosts ($availableHosts)"
-        exit
+    if($vCluster.Count -gt $hosts.Count) { 
+        My-Logger "Not enough hosts ($($hosts.Count)) to deploy the number of requested vHosts ($($vCluster.Count)) ... Aborting" Red
     }
-    $hosts = $hosts | Sort-Object -Property MemoryUsageGB | Select-Object -First $requestedVirtualHosts
-    My-Logger "Verify hosts selected for deployment have enough memory to support $NestedESXivMEM Gb virtual hosts:"
-    #There's something wrong here, but it's not impacting as I know I have the capacity.
-    # $hosts | Foreach-Object {
-    #     $hostId = $_.Id;
-    #     $memAvailableGb = $_.MemoryTotalGB - $_.MemoryUsageGB
-    #     if($memAvailableGb > $NestedESXivMEM) { My-Logger "VMHost Id=$hostId memAvailable=$memAvailableGb Gb OKay" } # Why isn't this true???
-    #     else { My-Logger "VMHost Id=$hostId memAvailable=$memAvailableGb Gb Fail" }
-    # }
-
-    #Need to re-hash this to attach VM to specific datastores on the Hosts
-    $datastore = Get-Datastore -Server $viConnection -Name $VMDatastore | Select-Object -First 1
-
-    $datacenter = $cluster | Get-Datacenter
-
-
-    $vHostsEnumerator = $NestedESXiHostnameToIPs.GetEnumerator()
-    $hosts | Foreach-Object {
-        if(!$vHostsEnumerator.MoveNext()) {
-            My-Logger "Error: the number of nested hosts is out of synch with the available host list"
-        }
-        $VMName = $vHostsEnumerator.Current.Key
-        $VMIPAddress = $vHostsEnumerator.Current.Value
-        $hostId = $_.Id;
-
-        My-Logger "Preparing to create VM $VMName with IP $VMIPAddress on Host $hostId"
-        $ovfconfig = Get-OvfConfiguration $NestedESXiApplianceOVA
-        $networkMapLabel = ($ovfconfig.ToHashTable().keys | Where-Object {$_ -Match "NetworkMapping"}).replace("NetworkMapping.","").replace("-","_").replace(" ","_")
-        $ovfconfig.NetworkMapping.$networkMapLabel.value = $VMNetwork
-
-        $ovfconfig.common.guestinfo.hostname.value = $VMName
-        $ovfconfig.common.guestinfo.ipaddress.value = $VMIPAddress
-        $ovfconfig.common.guestinfo.netmask.value = $VMNetmask
-        $ovfconfig.common.guestinfo.gateway.value = $VMGateway
-        $ovfconfig.common.guestinfo.dns.value = $VMDNS
-        $ovfconfig.common.guestinfo.domain.value = $VMDomain
-        $ovfconfig.common.guestinfo.ntp.value = $VMNTP
-        $ovfconfig.common.guestinfo.syslog.value = $VMSyslog
-        $ovfconfig.common.guestinfo.password.value = $VMPassword
-        if($VMSSH -eq "true") {
-            $VMSSHVar = $true
-        } else {
-            $VMSSHVar = $false
-        }
-        $ovfconfig.common.guestinfo.ssh.value = $VMSSHVar
-
-        My-Logger "Deploying Nested ESXi VM $VMName ..."
-        $vm = Import-VApp -Source $NestedESXiApplianceOVA -OvfConfiguration $ovfconfig -Name $VMName -Location $cluster -VMHost $_ -Datastore $datastore -DiskStorageFormat thin
-
-        if($vm) {
-            My-Logger "the VM was created"
-        }
-        else { My-Logger "Something happened (and it wasn't good)" }
+    else {
+        My-Logger "`tEnough hosts exist ($($hosts.Count)) to deploy the number of requested vHosts ($($vCluster.Count))" Green
+    
+        $hosts = $hosts | Sort-Object -Property MemoryUsageGB | Select-Object -First $vCluster.Count
+        My-Logger "Verify hosts selected for deployment have enough memory to support $($vSphereSpec.vMem) Gb virtual hosts:"
+        $hostsHaveMemory = $true;
+        $hosts | Foreach-Object {
+            $hostName = $_.Name;
+            $memAvailableGb = [Math]::Floor($_.MemoryTotalGB - $_.MemoryUsageGB)
+            if($memAvailableGb -gt $vSphereSpec.vMem) { My-Logger "`tVMHost Name=$hostName memAvailable=$memAvailableGb Gb OKay" Green } # Why isn't this true???
+            else { My-Logger "`tVMHost Name=$hostName memAvailable=$memAvailableGb Gb Fail" Red; $hostsHaveMemory = $false }
+        }    
     }
+
+    if($hostsHaveMemory) {
+        #Need to re-hash this to attach VM to specific datastores on the Hosts
+        $datastore = Get-Datastore -Server $viConnection -Name $vHostSpec.Storage.Main | Select-Object -First 1    
+        #$datacenter = $cluster | Get-Datacenter
+        $cl = Get-ContentLibrary -Name $vSphereSpec.ContentLibrary
+        $cli = Get-ContentLibraryItem -Name $vSphereSpec.ContentLibraryItem -ContentLibrary $cl
+        $hostCounter=0
+        $vCluster.GetEnumerator() | Sort-Object -Property Key | Foreach-Object {
+            # $vHostId = $_.Key
+            $vHostConfig = $_.Value
+            $hostObject = $hosts[$hostCounter]
+    
+            $vm = $cluster | Get-VM -Name $vHostConfig.vmname -ErrorAction SilentlyContinue
+            if($vm) {
+                My-Logger "Found vm $($vm.Name) already exists on host $($vm.VMHost.Name)"
+            }
+            else {
+                My-Logger "Creating VM $($vHostConfig.vmname) on host $($hostObject.Name).  Skipping create."
+    
+                # $ovfconfig = Get-OvfConfiguration $NestedESXiApplianceOVA
+                $ovfconfig = Get-OvfConfiguration -ContentLibraryItem $cli -Target $hostObject
+                $networkMapLabel = ($ovfconfig.ToHashTable().keys | Where-Object {$_ -Match "NetworkMapping"}).replace("NetworkMapping.","").replace("-","_").replace(" ","_")
+                $ovfconfig.NetworkMapping.$networkMapLabel.value = $VMNetwork
+        
+                $ovfconfig.common.guestinfo.hostname.value = $vHostSpec.Network.Name
+                $ovfconfig.common.guestinfo.ipaddress.value = $vHostConfig.ip
+                $ovfconfig.common.guestinfo.netmask.value = $vHostSpec.Network.Netmask
+                $ovfconfig.common.guestinfo.gateway.value = $vHostSpec.Network.Gateway
+                $ovfconfig.common.guestinfo.dns.value = $vHostSpec.Network.DNS
+                $ovfconfig.common.guestinfo.domain.value = $vHostSpec.Domain
+                $ovfconfig.common.guestinfo.ntp.value = $vHostSpec.NTP
+                $ovfconfig.common.guestinfo.syslog.value = $vHostSpec.Syslog
+                $ovfconfig.common.guestinfo.password.value = $vHostSpec.Password
+                $ovfconfig.common.guestinfo.ssh.value = $vHostSpec.VMSSH
+        
+                My-Logger "Deploying vHost $($vHostConfig.vmname) ..."
+    
+                # $vm = Import-VApp -Source $NestedESXiApplianceOVA -OvfConfiguration $ovfconfig -Name $vHostConfig.vmname -Location $cluster -VMHost $hostObject -Datastore $datastore -DiskStorageFormat thin
+                $vm = New-VM -ContentLibraryItem $cli -OvfConfiguration $ovfconfig -Name $vHostConfig.vmname -Location $vHostSpec.Folder -VMHost $hostObject -Datastore $datastore -DiskStorageFormat thin
+        
+                if($vm) {
+                    My-Logger "the VM was created"
+                }
+                else { My-Logger "Something happened (and it wasn't good)" }
+            }
+    
+            $hostCounter++
+        }
+    }
+
+    Read-Host -Prompt 'Press Enter when done'
 }
 
 Function Delete-Edge-Cluster {
-    My-Logger "Powering off any VMs that are powered on"
+    My-Logger "Deleting the edge cluster"
+    $vCluster.GetEnumerator() | Sort-Object -Property Key | Foreach-Object {
+        $vHostId = $_.Key
+        $vHostConfig = $_.Value
+        $hostObject = $hosts[$hostCounter]
+
+        $vm = $cluster | Get-VM -Name $vHostConfig.vmname -ErrorAction SilentlyContinue
+        if($vm) {
+            My-Logger "Found vm $($vm.Name) already exists on host $($vm.VMHost.Name)"
+        }
+    }
     foreach ($vm in $foundVMs) {
-        $ps = $vm.PowerState
-        $VMName = $vm.Name
-        if($ps -eq "PoweredOn") { My-Logger "VM $VMName powered on.  Stopping ... " Blue $true; Stop-VM $vm -Confirm=$true; My-Logger "done"; }
-        else  { My-Logger "VM $VMName powered off"}
+        if($vm.PowerState -eq "PoweredOn") { My-Logger "VM $($vm.Name) powered on.  Stopping ... " Blue $true; Stop-VM $vm -Confirm=$true; My-Logger "done"; }
+        else  { My-Logger "VM $($vm.Name) powered off" }
     }
 
     My-Logger "Deleting vHost VMs ... " Blue $true
@@ -422,9 +155,92 @@ Function Delete-Edge-Cluster {
     My-Logger "done"
 }
 
-###################################  Function dump from main script
+###################################  Function dump from main script and random code
 
-if($setupNewVC -eq 1) {
+
+# WL's function to print out and confirm the settings.  Use for inspiration before deleting.
+Function Confirm-Deployment {
+    # Write-Host -ForegroundColor Magenta "`nPlease confirm the following configuration will be deployed:`n"
+
+    # Write-Host -ForegroundColor Yellow "---- Virtual ESXi cluster Image ---- "
+    # Write-Host -NoNewline -ForegroundColor Green "Nested ESXi Image Path: "
+    # Write-Host -ForegroundColor White $NestedESXiApplianceOVA
+
+    # Write-Host -ForegroundColor Yellow "`n---- vCenter Server Deployment Target Configuration ----"
+    # Write-Host -NoNewline -ForegroundColor Green "vCenter Server Address: "
+    # Write-Host -ForegroundColor White $vSphereSpec.vCenterServer
+    # Write-Host -NoNewline -ForegroundColor Green "VM Network: "
+    # Write-Host -ForegroundColor White $VMNetwork
+
+    # Write-Host -NoNewline -ForegroundColor Green "VM Storage: "
+    # Write-Host -ForegroundColor White $VMDatastore
+    # Write-Host -NoNewline -ForegroundColor Green "VM Cluster: "
+    # Write-Host -ForegroundColor White $VMCluster
+    # Write-Host -NoNewline -ForegroundColor Green "VM vApp: "
+    # Write-Host -ForegroundColor White $VAppName
+
+    # Write-Host -ForegroundColor Yellow "`n---- vESXi Configuration ----"
+    # Write-Host -NoNewline -ForegroundColor Green "# of Nested ESXi VMs: "
+    # Write-Host -ForegroundColor White $NestedESXiHostnameToIPs.count
+    # Write-Host -NoNewline -ForegroundColor Green "vCPU: "
+    # Write-Host -ForegroundColor White $vSphereSpec.vCPU
+    # Write-Host -NoNewline -ForegroundColor Green "vMEM: "
+    # Write-Host -ForegroundColor White "$vSphereSpec.vMem GB"
+    # Write-Host -NoNewline -ForegroundColor Green "Caching VMDK: "
+    # Write-Host -ForegroundColor White "$vSphereSpec.Storage.Caching GB"
+    # Write-Host -NoNewline -ForegroundColor Green "Capacity VMDK: "
+    # Write-Host -ForegroundColor White "$vSphereSpec.Storage.Capacity GB"
+    # Write-Host -NoNewline -ForegroundColor Green "IP Address(s): "
+    # Write-Host -ForegroundColor White $NestedESXiHostnameToIPs.Values
+    # Write-Host -NoNewline -ForegroundColor Green "Netmask "
+    # Write-Host -ForegroundColor White $VMNetmask
+    # Write-Host -NoNewline -ForegroundColor Green "Gateway: "
+    # Write-Host -ForegroundColor White $VMGateway
+    # Write-Host -NoNewline -ForegroundColor Green "DNS: "
+    # Write-Host -ForegroundColor White $VMDNS
+    # Write-Host -NoNewline -ForegroundColor Green "NTP: "
+    # Write-Host -ForegroundColor White $VMNTP
+    # Write-Host -NoNewline -ForegroundColor Green "Syslog: "
+    # Write-Host -ForegroundColor White $VMSyslog
+    # Write-Host -NoNewline -ForegroundColor Green "Enable SSH: "
+    # Write-Host -ForegroundColor White $VMSSH
+    # Write-Host -NoNewline -ForegroundColor Green "Create VMFS Volume: "
+    # Write-Host -ForegroundColor White $VMVMFS
+
+    # $esxiTotalCPU = $NestedESXiHostnameToIPs.count * [int]$vSphereSpec.vCPU
+    # $esxiTotalMemory = $NestedESXiHostnameToIPs.count * [int]$vSphereSpec.vMem
+    # $esxiTotalStorage = ($NestedESXiHostnameToIPs.count * [int]$vSphereSpec.Storage.Caching) + ($NestedESXiHostnameToIPs.count * [int]$vSphereSpec.Storage.Capacity)
+
+    # Write-Host -ForegroundColor Yellow "`n---- Resource Requirements ----"
+    # Write-Host -NoNewline -ForegroundColor Green "ESXi     VM CPU: "
+    # Write-Host -NoNewline -ForegroundColor White $esxiTotalCPU
+    # Write-Host -NoNewline -ForegroundColor Green " ESXi     VM Memory: "
+    # Write-Host -NoNewline -ForegroundColor White $esxiTotalMemory "GB "
+    # Write-Host -NoNewline -ForegroundColor Green "ESXi     VM Storage: "
+    # Write-Host -ForegroundColor White $esxiTotalStorage "GB"
+    # Write-Host -NoNewline -ForegroundColor Green "VCSA     VM CPU: "
+    # Write-Host -NoNewline -ForegroundColor White $vcsaTotalCPU
+    # Write-Host -NoNewline -ForegroundColor Green " VCSA     VM Memory: "
+    # Write-Host -NoNewline -ForegroundColor White $vcsaTotalMemory "GB "
+    # Write-Host -NoNewline -ForegroundColor Green "VCSA     VM Storage: "
+    # Write-Host -ForegroundColor White $vcsaTotalStorage "GB"
+
+    # Write-Host -ForegroundColor White "---------------------------------------------"
+    # Write-Host -NoNewline -ForegroundColor Green "Total CPU: "
+    # Write-Host -ForegroundColor White ($esxiTotalCPU + $vcsaTotalCPU + $nsxManagerTotalCPU + $nsxEdgeTotalCPU)
+    # Write-Host -NoNewline -ForegroundColor Green "Total Memory: "
+    # Write-Host -ForegroundColor White ($esxiTotalMemory + $vcsaTotalMemory + $nsxManagerTotalMemory + $nsxEdgeTotalMemory) "GB"
+    # Write-Host -NoNewline -ForegroundColor Green "Total Storage: "
+    # Write-Host -ForegroundColor White ($esxiTotalStorage + $vcsaTotalStorage + $nsxManagerTotalStorage + $nsxEdgeTotalStorage) "GB"
+
+    # Write-Host -ForegroundColor Magenta "`nWould you like to proceed with this deployment?`n"
+    # $answer = Read-Host -Prompt "Do you accept (Y or N)"
+    # if($answer -ne "Y" -or $answer -ne "y") {
+    #     exit
+    # }
+}
+
+Function setupNewVC {
     My-Logger "setupNewVC is not implemented"
 #     My-Logger "Connecting to the new VCSA ..."
 #     $vc = Connect-VIServer $VCSAIPAddress -User "administrator@$VCSASSODomainName" -Password $VCSASSOPassword -WarningAction SilentlyContinue
@@ -467,10 +283,10 @@ if($setupNewVC -eq 1) {
 
 #             My-Logger "Querying ESXi host disks to create VSAN Diskgroups ..."
 #             foreach ($lun in $luns) {
-#                 if(([int]($lun.CapacityGB)).toString() -eq "$NestedESXiCachingvDisk") {
+#                 if(([int]($lun.CapacityGB)).toString() -eq "$vSphereSpec.Storage.Caching") {
 #                     $vsanCacheDisk = $lun.CanonicalName
 #                 }
-#                 if(([int]($lun.CapacityGB)).toString() -eq "$NestedESXiCapacityvDisk") {
+#                 if(([int]($lun.CapacityGB)).toString() -eq "$vSphereSpec.Storage.Capacity") {
 #                     $vsanCapacityDisk = $lun.CanonicalName
 #                 }
 #             }
@@ -567,10 +383,10 @@ if($setupNewVC -eq 1) {
 #     Disconnect-VIServer $vc -Confirm:$false
 }
 
-if($setupPacific -eq 1) {
+Function setupPacific {
     Write-Host -ForegroundColor Red "setupPacific is not implemented"
-#     My-Logger "Connecting to Management vCenter Server $VIServer for enabling Pacific ..."
-#     Connect-VIServer $VIServer -User $VIUsername -Password $VIPassword -WarningAction SilentlyContinue | Out-Null
+#     My-Logger "Connecting to Management vCenter Server $vSphereSpec.vCenterServer for enabling Pacific ..."
+#     Connect-VIServer $vSphereSpec.vCenterServer -User $vSphereSpec.UserName -Password $vSphereSpec.Password -WarningAction SilentlyContinue | Out-Null
 
 #     My-Logger "Creating Principal Identity in vCenter Server ..."
 #     $princpitalIdentityCmd = "echo `'$VCSASSOPassword`' | appliancesh dcli +username `'administrator@$VCSASSODomainName`' +password `'$VCSASSOPassword`' +show-unreleased com vmware vcenter nsxd principalidentity create --username `'$NSXAdminUsername`' --password `'$NSXAdminPassword`'"
@@ -579,7 +395,51 @@ if($setupPacific -eq 1) {
 #     My-Logger "Creating local $DevOpsUsername User in vCenter Server ..."
 #     $devopsUserCreationCmd = "/usr/lib/vmware-vmafd/bin/dir-cli user create --account $DevOpsUsername --first-name `"Dev`" --last-name `"Ops`" --user-password `'$DevOpsPassword`' --login `'administrator@$VCSASSODomainName`' --password `'$VCSASSOPassword`'"
 #     Invoke-VMScript -ScriptText $devopsUserCreationCmd -vm (Get-VM -Name $VCSADisplayName) -GuestUser "root" -GuestPassword "$VCSARootPassword" | Out-File -Append -LiteralPath $verboseLogFile
+}
 
-    My-Logger "Disconnecting from Management vCenter ..."
-    # Disconnect-VIServer * -Confirm:$false | Out-Null
+Function moveVMsIntovApp {
+    My-Logger "Creating vApp $VAppName ..."
+#     $VApp = New-VApp -Name $VAppName -Server $viConnection -Location $cluster
+
+#     if(-Not (Get-Folder $VMFolder -ErrorAction Ignore)) {
+#         My-Logger "Creating VM Folder $VMFolder ..."
+#         $folder = New-Folder -Name $VMFolder -Server $viConnection -Location (Get-Datacenter $VMDatacenter | Get-Folder vm)
+#     }
+
+#     if($deployNestedESXiVMs -eq 1) {
+#         My-Logger "Moving Nested ESXi VMs into $VAppName vApp ..."
+#         $NestedESXiHostnameToIPs.GetEnumerator() | Sort-Object -Property Value | Foreach-Object {
+#             $vm = Get-VM -Name $_.Key -Server $viConnection
+#             Move-VM -VM $vm -Server $viConnection -Destination $VApp -Confirm:$false | Out-File -Append -LiteralPath $verboseLogFile
+#         }
+#     }
+
+#     if($deployVCSA -eq 1) {
+#         $vcsaVM = Get-VM -Name $VCSADisplayName -Server $viConnection
+#         My-Logger "Moving $VCSADisplayName into $VAppName vApp ..."
+#         Move-VM -VM $vcsaVM -Server $viConnection -Destination $VApp -Confirm:$false | Out-File -Append -LiteralPath $verboseLogFile
+#     }
+
+#     if($deployNSXManager -eq 1) {
+#         $nsxMgrVM = Get-VM -Name $NSXTMgrDisplayName -Server $viConnection
+#         My-Logger "Moving $NSXTMgrDisplayName into $VAppName vApp ..."
+#         Move-VM -VM $nsxMgrVM -Server $viConnection -Destination $VApp -Confirm:$false | Out-File -Append -LiteralPath $verboseLogFile
+#     }
+
+#     if($deployTKGI -eq 1) {
+#         $TKGIVM = Get-VM -Name $TKGIPKSConsoleName  -Server $viConnection
+#         My-Logger "Moving $TKGIPKSConsoleName into $VAppName vApp ..."
+#         Move-VM -VM $TKGIVM -Server $viConnection -Destination $VApp -Confirm:$false | Out-File -Append -LiteralPath $verboseLogFile
+#     }
+
+#     if($deployNSXEdge -eq 1) {
+#         My-Logger "Moving NSX Edge VMs into $VAppName vApp ..."
+#         $NSXTEdgeHostnameToIPs.GetEnumerator() | Sort-Object -Property Value | Foreach-Object {
+#             $nsxEdgeVM = Get-VM -Name $_.Key -Server $viConnection
+#             Move-VM -VM $nsxEdgeVM -Server $viConnection -Destination $VApp -Confirm:$false | Out-File -Append -LiteralPath $verboseLogFile
+#         }
+#     }
+
+    My-Logger "Moving $VAppName to VM Folder $VMFolder ..."
+#     Move-VApp -Server $viConnection $VAppName -Destination (Get-Folder -Server $viConnection $VMFolder) | Out-File -Append -LiteralPath $verboseLogFile
 }
