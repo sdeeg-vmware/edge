@@ -33,10 +33,14 @@ Function VCenter-Connect {
     # If connect isn't working make sure to disable the TSL checks in PowerCLI
     # Set-PowerCLIConfiguration -InvalidCertificateAction Ignore
     My-Logger "Connecting to vCenter Server $vSphereSpec.vCenterServer ... " Blue $true
-    $viConnection = Connect-VIServer $vSphereSpec.vCenterServer -User $vSphereSpec.UserName -Password $vSphereSpec.Password -WarningAction SilentlyContinue
+    $viConnection = Connect-VIServer $vSphereSpec.vCenterServer -User $vSphereSpec.UserName -Password $vSphereSpec.Password -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
     if(!$viConnection) {
-        My-Logger "Connect-VIServer came back empty.  Exiting." Red
-        exit
+        if($debug) {
+            My-Logger "Connect-VIServer came back empty.  debug=true so continuing." DarkMagenta
+        } else {
+            My-Logger "Connect-VIServer came back empty.  Exiting." Red
+            exit
+        }
     }
     My-Logger "connected" Green
 
@@ -136,9 +140,9 @@ Function Create-Edge-Cluster {
 Function Delete-Edge-Cluster {
     My-Logger "Deleting the edge cluster"
     $vCluster.GetEnumerator() | Sort-Object -Property Key | Foreach-Object {
-        $vHostId = $_.Key
+        # $vHostId = $_.Key
         $vHostConfig = $_.Value
-        $hostObject = $hosts[$hostCounter]
+        # $hostObject = $hosts[$hostCounter]
 
         $vm = $cluster | Get-VM -Name $vHostConfig.vmname -ErrorAction SilentlyContinue
         if($vm) {

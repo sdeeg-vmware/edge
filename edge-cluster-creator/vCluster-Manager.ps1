@@ -29,7 +29,8 @@ $vCluster = @{
     # }
 }
 
-$NestedESXiApplianceOVA = "/home/sdeeg/Downloads/Nested_ESXi7.0u3g_Appliance_Template_v1.ova"
+# $NestedESXiApplianceOVA = "/home/sdeeg/Downloads/Nested_ESXi7.0u3g_Appliance_Template_v1.ova"
+$NestedESXiApplianceOVA = "/Users/sdeeg/Downloads/Nested_ESXi7.0u3g_Appliance_Template_v1.ova"
 
 # Optional: Create/override any variables here
 $verboseLogFile = "edge-manager.log"
@@ -37,6 +38,10 @@ if((Test-Path $verboseLogFile)) {
     Write-Host "Logfile $verboseLogFile exists at startup and will be deleted"
     Remove-Item $verboseLogFile
 }
+
+# Don't clear console.  default=$false
+$debug = $true
+
 
 #############################################  Functions      #############################################
 
@@ -48,16 +53,16 @@ if((Test-Path $verboseLogFile)) {
 
 #############################################  Local Functions  #############################################
 
-Function Begin-New-Output {
-    # Clear-Host
-    My-Writer "--- Edge Cluster Manager ---" Yellow
+Function Write-Header {
+    if(!$debug) { Clear-Host }
+    My-Writer "--- Edge Cluster Manager ---" DarkYellow
     My-Writer ""
 }
 
 Function Write-vCluster-Overview {
     My-Logger "Virtual Cluster Status:"
     $vCluster.GetEnumerator() | Sort-Object -Property Key | Foreach-Object {
-        $vHostId = $_.Key
+        # $vHostId = $_.Key
         $vHostValues = $_.Value
         $vm = Get-VM -Name $vHostValues.vmname -Location $vSphereSpec.Cluster -ErrorAction SilentlyContinue
         if($vm) {
@@ -81,7 +86,7 @@ Function Show-Cluster-Details {
 
     My-Logger "`tvHosts:"
     $vCluster.GetEnumerator() | Sort-Object -Property Key | Foreach-Object {
-        $vHostId = $_.Key
+        # $vHostId = $_.Key
         $vHostValues = $_.Value
         $vm = Get-VM -Name $vHostValues.vmname -Location $vSphereSpec.Cluster -ErrorAction SilentlyContinue
         if($vm) {
@@ -111,12 +116,15 @@ $keepLooping=$true
 while($keepLooping) {
 
     Refresh-Cluster-Details
-    Begin-New-Output
+    Write-Header
     Write-vCluster-Overview
 
     $no = New-Object System.Management.Automation.Host.ChoiceDescription 'E&xit', 'Exit'
     $options = [System.Management.Automation.Host.ChoiceDescription[]]($no)
-    if($foundVMs.Count -eq 0) {
+    if(!$viConnection) {
+        $options += New-Object System.Management.Automation.Host.ChoiceDescription '&Pancakes', 'No vCenter connection, so do nothing.'
+    }
+    elseif($foundVMs.Count -eq 0) {
         $options += New-Object System.Management.Automation.Host.ChoiceDescription '&Create cluster', 'Create the edge cluster'
     } else {
         $options += New-Object System.Management.Automation.Host.ChoiceDescription '&Delete cluster', 'Delete the edge cluster'
@@ -130,7 +138,10 @@ while($keepLooping) {
             $keepLooping=$false
         }
         1 {
-            if($foundVMs.Count -gt 0) {
+            if(!$viConnection) {
+                My-Writer "Enjoy the pancakes"
+            }
+            elseif($foundVMs.Count -gt 0) {
                 Begin-New-Output
                 Delete-Edge-Cluster
             } else {
@@ -139,7 +150,7 @@ while($keepLooping) {
             }    
         }
         2 {
-            Clear-Host
+            if(!$debug) { Clear-Host }
             Show-Cluster-Details
             Write-Host ""
             Read-Host -Prompt 'Press Enter when done'

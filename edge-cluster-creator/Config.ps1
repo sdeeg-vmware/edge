@@ -1,6 +1,6 @@
 # vCluster Manager
 
-$debug = $true
+$debug = $false
 $verboseLogFile = "edge-cluster-creation.log"
 
 $vCluster = @{}
